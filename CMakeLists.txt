@@ -14,4 +14,7 @@ add_executable(UbloxGnssService main.c
         tests/ublox_tests.c
         tests/ublox_tests.h
         tests/tests.c
-        tests/tests.h)
+        tests/tests.h
+        utils/intersect.c
+        utils/intersect.h
+        utils/coord.h)
