@@ -4,7 +4,9 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 #include <unistd.h>
+#include "tests.h"
 
 #include "../ublox/ublox.h"
 #include "../utils/Fletcher8.h"
@@ -25,11 +27,11 @@ void test_no_payload() {
     };
 
     const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, sizeof(ubx_msg) - UBX_SYNC_LEN - UBX_CK_LEN);
-    *(uint16_t*)(ubx_msg + UBX_PAYLOAD_OFFSET) = ck;
+    memcpy(ubx_msg + UBX_PAYLOAD_OFFSET, &ck, sizeof(uint16_t));
 
     write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg));
 
-    uint8_t *msg;
+    uint8_t *msg = NULL;
     const int retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
 
     close(pipe_fd[PIPE_WRITE]);
@@ -37,6 +39,7 @@ void test_no_payload() {
 
     assert(retval == 0);
     assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
 }
 
 void test_partial_message() {
@@ -52,11 +55,11 @@ void test_partial_message() {
     };
 
     const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, sizeof(ubx_msg) - UBX_SYNC_LEN - UBX_CK_LEN);
-    *(uint16_t*)(ubx_msg + UBX_PAYLOAD_OFFSET) = ck;
+    memcpy(ubx_msg + UBX_PAYLOAD_OFFSET, &ck, sizeof(uint16_t));
 
     write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg) / 2);
 
-    uint8_t *msg;
+    uint8_t *msg = NULL;
     int retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
     if (retval < 0) goto finally;
 
@@ -70,6 +73,7 @@ void test_partial_message() {
 
     assert(retval == 0);
     assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
 }
 
 void test_false_start() {
@@ -86,12 +90,12 @@ void test_false_start() {
     };
 
     const uint16_t ck = fletcher8(ubx_msg + 1 + UBX_CLASS_OFFSET, sizeof(ubx_msg) - 1 - UBX_SYNC_LEN - UBX_CK_LEN);
-    *(uint16_t*)(ubx_msg + 1 + UBX_PAYLOAD_OFFSET) = ck;
+    memcpy(ubx_msg + 1 + UBX_PAYLOAD_OFFSET, &ck, sizeof(uint16_t));
 
     write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg));
 
     int retval;
-    uint8_t *msg;
+    uint8_t *msg = NULL;
     do {
         retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
     } while (retval > 0);
@@ -101,6 +105,7 @@ void test_false_start() {
 
     assert(retval == 0);
     assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
 }
 
 void test_offset_start() {
@@ -119,12 +124,12 @@ void test_offset_start() {
     const int start_offset = 3;
 
     const uint16_t ck = fletcher8(ubx_msg + start_offset + UBX_CLASS_OFFSET, sizeof(ubx_msg) - start_offset - UBX_SYNC_LEN - UBX_CK_LEN);
-    *(uint16_t*)(ubx_msg + start_offset + UBX_PAYLOAD_OFFSET) = ck;
+    memcpy(ubx_msg + start_offset + UBX_PAYLOAD_OFFSET, &ck, sizeof(uint16_t));
 
     write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg));
 
     int retval;
-    uint8_t *msg;
+    uint8_t *msg = NULL;
     do {
         retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
     } while (retval > 0);
@@ -134,6 +139,7 @@ void test_offset_start() {
 
     assert(retval == 0);
     assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
 }
 
 void test_payload() {
@@ -152,12 +158,12 @@ void test_payload() {
     const int payload_len = 3;
 
     const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, sizeof(ubx_msg) - UBX_SYNC_LEN - UBX_CK_LEN);
-    *(uint16_t*)(ubx_msg + UBX_PAYLOAD_OFFSET + payload_len) = ck;
+    memcpy(ubx_msg + UBX_PAYLOAD_OFFSET + payload_len, &ck, sizeof(uint16_t));
 
     write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg));
 
     int retval;
-    uint8_t *msg;
+    uint8_t *msg = NULL;
     do {
         retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
     } while (retval > 0);
@@ -167,12 +173,65 @@ void test_payload() {
 
     assert(retval == 0);
     assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
 }
 
-void test_parse_ublox_msg() {
-    test_no_payload();
-    test_partial_message();
-    test_false_start();
-    test_offset_start();
-    test_payload();
+void test_garbage() {
+    int pipe_fd[2];
+    pipe(pipe_fd);
+
+    uint8_t ubx_msg[50];
+
+    for (int i = 0; i < sizeof(ubx_msg); i++) {
+        ubx_msg[i] = i;
+    }
+
+    write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg));
+
+    int retval, run = 3;
+    uint8_t *msg = NULL;
+    do {
+        retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
+        run--;
+    } while (retval > 0 && run > 0);
+
+    close(pipe_fd[PIPE_WRITE]);
+    close(pipe_fd[PIPE_READ]);
+
+    assert(retval == UNKNOWN_DATA);
+    assert(msg == NULL);
+}
+
+void test_config() {
+    int pipe_fd[2];
+    pipe(pipe_fd);
+
+    assert(configure_ublox(pipe_fd[PIPE_WRITE]) == 0);
+
+    int retval;
+    uint8_t *msg = NULL;
+    do {
+        retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
+    } while (retval > 0);
+
+    close(pipe_fd[PIPE_WRITE]);
+    close(pipe_fd[PIPE_READ]);
+
+    assert(retval == 0);
+    assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
+    assert(msg[1] == UBX_SYNC_CHAR_2);
+    assert(msg[2] == UBX_CFG);
+    assert(msg[3] == UBX_CFG_VALSET);
+}
+
+void run_ublox_tests() {
+    TEST(test_no_payload)
+    TEST(test_partial_message)
+    TEST(test_false_start)
+    TEST(test_offset_start)
+    TEST(test_payload)
+    TEST(test_garbage)
+
+    TEST(test_config)
 }

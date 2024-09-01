@@ -5,6 +5,6 @@
 #ifndef UBLOX_TESTS_H
 #define UBLOX_TESTS_H
 
-void test_parse_ublox_msg();
+void run_ublox_tests();
 
 #endif //UBLOX_TESTS_H

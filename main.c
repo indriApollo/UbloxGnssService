@@ -10,7 +10,7 @@
 #define RUN_TESTS
 
 #ifdef RUN_TESTS
-#include "tests/tests.h"
+#include "tests/ublox_tests.h"
 #endif
 
 #define SERIAL_PORT_NAME   "/dev/ttyACM0"
@@ -85,18 +85,20 @@ static int setup_epoll(const int signalfd_fd, const int ublox_fd) {
 int main(void)
 {
     #ifdef RUN_TESTS
-    run_tests();
+    run_ublox_tests();
     exit(EXIT_SUCCESS);
     #endif
 
     const int signalfd_fd = setup_signal_handler();
 
-    const int ublox_fd = setup_ublox(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
+    const int ublox_fd = setup_ublox_port(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
     if (ublox_fd < 0) exit(EXIT_FAILURE);
 
     const int epoll_fd = setup_epoll(signalfd_fd, ublox_fd);
 
     printf("Ready\n");
+
+    configure_ublox(ublox_fd);
 
     while(1) {
         struct epoll_event epoll_events[EPOLL_SINGLE_EVENT];
@@ -128,7 +130,7 @@ int main(void)
 
     close(epoll_fd);
     close(signalfd_fd);
-    close_ublox(ublox_fd);
+    close_ublox_port(ublox_fd);
 
     printf("Bye :)\n");
 

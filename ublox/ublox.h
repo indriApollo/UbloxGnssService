@@ -27,14 +27,30 @@
 #define PARTIAL_MSG     1
 #define PAYLOAD_TOO_BIG 2
 #define CK_FAIL         3
+#define UNKNOWN_DATA    4
 
+enum ubx_class {
+    UBX_ACK = 0x05,
+    UBX_CFG = 0x06,
+    UBX_MON = 0x0a
+};
 
-int setup_ublox(const char *port_name, speed_t baud_rate);
+enum ubx_id {
+    UBX_CFG_VALSET = 0x8a
+};
 
-void close_ublox(int fd);
+enum ubx_cfg_key_id {
+    CFG_I2C_ENABLED = 0x10510003
+};
+
+int setup_ublox_port(const char *port_name, speed_t baud_rate);
+
+void close_ublox_port(int fd);
 
 int parse_ublox_msg(int fd, uint8_t **msg);
 
 int handle_incoming_ublox_msg(int fd);
+
+int configure_ublox(int fd);
 
 #endif //UBLOX_H
