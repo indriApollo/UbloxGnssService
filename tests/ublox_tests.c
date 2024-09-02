@@ -9,10 +9,36 @@
 #include "tests.h"
 
 #include "../ublox/ublox.h"
-#include "../utils/Fletcher8.h"
+#include "../utils/fletcher8.h"
 
 #define PIPE_READ 0
 #define PIPE_WRITE 1
+
+void test_known_good_msg() {
+    int pipe_fd[2];
+    pipe(pipe_fd);
+
+    const uint8_t ubx_msg[] = {
+        0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+        0x1D, 0xAB
+    };
+
+    write(pipe_fd[PIPE_WRITE], ubx_msg, sizeof(ubx_msg));
+
+    int retval;
+    uint8_t *msg = NULL;
+    do {
+        retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
+    } while (retval > 0);
+
+    close(pipe_fd[PIPE_WRITE]);
+    close(pipe_fd[PIPE_READ]);
+
+    assert(retval == 0);
+    assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
+}
 
 void test_no_payload() {
     int pipe_fd[2];
@@ -225,7 +251,31 @@ void test_config() {
     assert(msg[3] == UBX_CFG_VALSET);
 }
 
+void test_version() {
+    int pipe_fd[2];
+    pipe(pipe_fd);
+
+    assert(request_ublox_version(pipe_fd[PIPE_WRITE]) == 0);
+
+    int retval;
+    uint8_t *msg = NULL;
+    do {
+        retval = parse_ublox_msg(pipe_fd[PIPE_READ], &msg);
+    } while (retval > 0);
+
+    close(pipe_fd[PIPE_WRITE]);
+    close(pipe_fd[PIPE_READ]);
+
+    assert(retval == 0);
+    assert(msg != NULL);
+    assert(msg[0] == UBX_SYNC_CHAR_1);
+    assert(msg[1] == UBX_SYNC_CHAR_2);
+    assert(msg[2] == UBX_MON);
+    assert(msg[3] == UBX_MON_VER);
+}
+
 void run_ublox_tests() {
+    TEST(test_known_good_msg)
     TEST(test_no_payload)
     TEST(test_partial_message)
     TEST(test_false_start)
@@ -234,4 +284,6 @@ void run_ublox_tests() {
     TEST(test_garbage)
 
     TEST(test_config)
+
+    TEST(test_version)
 }

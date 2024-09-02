@@ -98,7 +98,9 @@ int main(void)
 
     printf("Ready\n");
 
-    configure_ublox(ublox_fd);
+    request_ublox_version(ublox_fd);
+
+    //configure_ublox(ublox_fd);
 
     while(1) {
         struct epoll_event epoll_events[EPOLL_SINGLE_EVENT];

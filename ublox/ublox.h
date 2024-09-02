@@ -28,6 +28,7 @@
 #define PAYLOAD_TOO_BIG 2
 #define CK_FAIL         3
 #define UNKNOWN_DATA    4
+#define UNHANDLED_MSG   5
 
 enum ubx_class {
     UBX_ACK = 0x05,
@@ -36,6 +37,7 @@ enum ubx_class {
 };
 
 enum ubx_id {
+    UBX_MON_VER = 0x04,
     UBX_CFG_VALSET = 0x8a
 };
 
@@ -52,5 +54,7 @@ int parse_ublox_msg(int fd, uint8_t **msg);
 int handle_incoming_ublox_msg(int fd);
 
 int configure_ublox(int fd);
+
+int request_ublox_version(int fd);
 
 #endif //UBLOX_H

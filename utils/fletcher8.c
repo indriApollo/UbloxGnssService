@@ -3,7 +3,7 @@
 //
 
 #include <stdint.h>
-#include "Fletcher8.h"
+#include "fletcher8.h"
 
 uint16_t fletcher8(const uint8_t* buffer, const uint16_t length) {
     uint8_t ck_a = 0, ck_b = 0;
@@ -13,5 +13,5 @@ uint16_t fletcher8(const uint8_t* buffer, const uint16_t length) {
         ck_b += ck_a;
     }
 
-    return (ck_a << 8) + ck_b;
+    return (uint16_t)ck_b << 8 | ck_a;
 }

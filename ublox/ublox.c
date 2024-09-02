@@ -6,21 +6,27 @@
 
 #include <assert.h>
 #include <stdbool.h>
-
-#include "../serial/serial_port.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "../utils/Fletcher8.h"
+#include "../serial/serial_port.h"
+#include "../utils/fletcher8.h"
+#include "../utils/buffer.h"
 
 #define WAIT_FOR_FIRST_BYTE 1
 #define INTER_BYTE_TIMEOUT  1
 
 #define CFG_KEY_SIZE sizeof(uint32_t)
+#define CFG_VERSION  0
+#define CFG_LAYER_RAM      1
 
-uint8_t input_buffer[128];
-uint8_t output_buffer[128];
+#define SW_VERSION_STR_LEN  30
+#define HW_VERSION_STR_LEN  10
+#define EXT_VERSION_OFFSET (SW_VERSION_STR_LEN + HW_VERSION_STR_LEN)
+#define EXT_VERSION_STR_LEN 30
+
+uint8_t input_buffer[256];
 
 enum read_progress {
     SEARCH_FOR_SYNC,
@@ -40,25 +46,6 @@ void reset_read(const int nbytes_to_keep) {
     buffer_read.offset = nbytes_to_keep;
     buffer_read.requested_count = UBX_MIN_LEN - nbytes_to_keep;
     buffer_read.progress = SEARCH_FOR_SYNC;
-}
-
-uint16_t as_uint16(const uint8_t *buf) {
-    return (uint16_t)buf[1] << 8 | buf[0];
-}
-
-void printf_buffer(const uint8_t *buf, const int n) {
-    for (int i = 0; i < n; i++) {
-        const uint8_t a = buf[i];
-        if (a == 10)
-            printf("[LF]");
-        else if (a == 13)
-            printf("[CR]");
-        else if (a >= 32 && a <= 126)
-            printf("%c", a);
-        else
-            printf("[%02x]", a);
-    }
-    printf("\n");
 }
 
 int setup_ublox_port(const char *port_name, const speed_t baud_rate) {
@@ -88,41 +75,78 @@ int disable_i2c(uint8_t *buf) {
     return CFG_KEY_SIZE + 1;
 }
 
-int configure_ublox(const int fd) {
-    int i = 0;
-
-    // Set header
-    output_buffer[i++] = UBX_SYNC_CHAR_1;
-    output_buffer[i++] = UBX_SYNC_CHAR_2;
-    output_buffer[i++] = UBX_CFG;
-    output_buffer[i] = UBX_CFG_VALSET;
-
-    // Set payload
-    i = UBX_PAYLOAD_OFFSET;
-    i += disable_i2c(output_buffer + i);
-
-    // set len
-    const uint16_t payload_len = i - UBX_PAYLOAD_OFFSET;
-    memcpy(output_buffer + UBX_LEN_OFFSET, &payload_len, sizeof(uint16_t));
-
-    const uint16_t ck = fletcher8(output_buffer + UBX_CLASS_OFFSET, UBX_HEADER_LEN + payload_len);
-    memcpy(output_buffer + i, &ck, sizeof(uint16_t));
-
-    i += UBX_CK_LEN;
-
-    assert(i < sizeof(output_buffer));
-
-    const ssize_t c = write(fd, output_buffer, i);
+int send_cmd(const int fd, const uint8_t *cmd, const int n) {
+    const ssize_t c = write(fd, cmd, n);
     if (c == -1) {
-        perror("configure_ublox write");
+        perror("send_cmd write");
         return -1;
     }
 
-    if (c != i) {
-        fprintf(stderr, "incomplete configure_ublox : actual %zd expected %d\n", c, i);
+    if (c != n) {
+        fprintf(stderr, "incomplete send_cmd : actual %zd expected %d\n", c, n);
+        return -1;
     }
 
-    printf_buffer(output_buffer, c);
+    printf_buffer(cmd, c);
+
+    return 0;
+}
+
+int configure_ublox(const int fd) {
+    int i = 0;
+    uint8_t ubx_msg[128];
+
+    // Set header
+    ubx_msg[i++] = UBX_SYNC_CHAR_1;
+    ubx_msg[i++] = UBX_SYNC_CHAR_2;
+    ubx_msg[i++] = UBX_CFG;
+    ubx_msg[i] = UBX_CFG_VALSET;
+
+    // Set payload
+    i = UBX_PAYLOAD_OFFSET;
+    ubx_msg[i++] = CFG_VERSION;
+    ubx_msg[i++] = CFG_LAYER_RAM;
+    ubx_msg[i++] = 0; // reserved
+    ubx_msg[i++] = 0; // reserved
+    i += disable_i2c(ubx_msg + i);
+
+    // set len
+    const uint16_t payload_len = i - UBX_PAYLOAD_OFFSET;
+    memcpy(ubx_msg + UBX_LEN_OFFSET, &payload_len, sizeof(uint16_t));
+
+    const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, UBX_HEADER_LEN + payload_len);
+    memcpy(ubx_msg + i, &ck, sizeof(uint16_t));
+
+    i += UBX_CK_LEN;
+
+    assert(i < sizeof(ubx_msg));
+    return send_cmd(fd, ubx_msg, i);
+}
+
+int request_ublox_version(const int fd) {
+    const uint8_t ubx_msg[] = {
+        UBX_SYNC_CHAR_1, UBX_SYNC_CHAR_2, UBX_MON, UBX_MON_VER, 0, 0, 0x0e, 0x34
+    };
+
+    return send_cmd(fd, ubx_msg, sizeof(ubx_msg));
+}
+
+int handle_ubx_mon(const uint8_t *msg) {
+    const uint8_t msg_id = msg[UBX_ID_OFFSET];
+
+    if (msg_id != UBX_MON_VER) return UNHANDLED_MSG;
+
+    char *sw_version = (char*)msg + UBX_PAYLOAD_OFFSET;
+    char *hw_version = (char*)msg + UBX_PAYLOAD_OFFSET + SW_VERSION_STR_LEN;
+
+    printf("versions:\n  sw: %s\n  hw: %s\n  xt: ", sw_version, hw_version);
+
+    const int ext_len = as_uint16(msg + UBX_LEN_OFFSET) - SW_VERSION_STR_LEN - HW_VERSION_STR_LEN;
+    for (int i = 0; i < ext_len / EXT_VERSION_STR_LEN; i++) {
+        const int offset = UBX_PAYLOAD_OFFSET + EXT_VERSION_OFFSET + (EXT_VERSION_STR_LEN * i);
+        printf("%s,", (char*)msg + offset);
+    }
+    printf("\n");
 
     return 0;
 }
@@ -134,7 +158,7 @@ int handle_ubx_ack(const uint8_t* msg) {
     const uint8_t acked_msg_id = msg[UBX_PAYLOAD_OFFSET + 1];
 
     if (!is_ack) {
-        printf("UBX-ACK-NACK class %d id %d\n", acked_msg_class, acked_msg_id);
+        printf("UBX-ACK-NAK class %d id %d\n", acked_msg_class, acked_msg_id);
         return -1;
     }
 
@@ -146,10 +170,12 @@ int handle_ublox_msg(const uint8_t* msg) {
     const uint8_t msg_class = msg[UBX_CLASS_OFFSET];
 
     switch (msg_class) {
+        case UBX_MON:
+            return handle_ubx_mon(msg);
         case UBX_ACK:
             return handle_ubx_ack(msg);
         default:
-            return -1;
+            return UNHANDLED_MSG;
     }
 }
 
@@ -161,9 +187,9 @@ int parse_ublox_msg(const int fd, uint8_t **msg) {
     if (c == -1)
         return -1;
 
-    printf("read %zd from ublox port\n", c);
+    //printf("read %zd from ublox port\n", c);
 
-    printf_buffer(input_buffer + buffer_read.offset, c);
+    //printf_buffer(input_buffer + buffer_read.offset, c);
 
     buffer_read.offset += c;
     buffer_read.requested_count -= c;
@@ -235,7 +261,7 @@ int parse_ublox_msg(const int fd, uint8_t **msg) {
 
     const uint16_t actual_ck = fletcher8(buffer_read.ubx_msg + UBX_CLASS_OFFSET, UBX_HEADER_LEN + payload_len);
     if (actual_ck != expected_ck) {
-        fprintf(stderr, "ck actual %d but expected %d\n", actual_ck, expected_ck);
+        fprintf(stderr, "ck actual %04x but expected %04x\n", actual_ck, expected_ck);
         return -CK_FAIL;
     }
 

@@ -4,8 +4,8 @@ project(UbloxGnssService C)
 set(CMAKE_C_STANDARD 17)
 
 add_executable(UbloxGnssService main.c
-        utils/Fletcher8.c
-        utils/Fletcher8.h
+        utils/fletcher8.c
+        utils/fletcher8.h
         serial/serial_port.c
         serial/serial_port.h
         ublox/ublox.c
@@ -16,4 +16,6 @@ add_executable(UbloxGnssService main.c
         tests/tests.h
         utils/intersect.c
         utils/intersect.h
-        utils/coord.h)
+        utils/coord.h
+        utils/buffer.c
+        utils/buffer.h)
