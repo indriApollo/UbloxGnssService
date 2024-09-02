@@ -7,13 +7,13 @@
 #include <sys/signalfd.h>
 #include "ublox/ublox.h"
 
-#define RUN_TESTS
+#define _RUN_TESTS
 
 #ifdef RUN_TESTS
 #include "tests/ublox_tests.h"
 #endif
 
-#define SERIAL_PORT_NAME   "/dev/ttyACM0"
+#define SERIAL_PORT_NAME   "/dev/serial/by-id/usb-u-blox_AG_-_www.u-blox.com_u-blox_GNSS_receiver-if00"
 #define SERIAL_BAUD_RATE   38400
 #define EPOLL_SINGLE_EVENT 1
 
@@ -91,16 +91,22 @@ int main(void)
 
     const int signalfd_fd = setup_signal_handler();
 
-    const int ublox_fd = setup_ublox_port(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
+    printf("Setting up serial port %s@%d\n", SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
+    int ublox_fd = setup_ublox_port(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
     if (ublox_fd < 0) exit(EXIT_FAILURE);
+
+    // Sending configurations will reset the ublox usb interface
+    printf("Configuring ublox ...\n");
+    configure_ublox(ublox_fd);
+    printf("Reconnecting serial port...\n");
+    ublox_fd = reconnect_ublox_port(ublox_fd, SERIAL_PORT_NAME, SERIAL_BAUD_RATE, 3);
+    if (ublox_fd < 0) exit(EXIT_FAILURE);
+
+    request_ublox_version(ublox_fd);
 
     const int epoll_fd = setup_epoll(signalfd_fd, ublox_fd);
 
     printf("Ready\n");
-
-    request_ublox_version(ublox_fd);
-
-    //configure_ublox(ublox_fd);
 
     while(1) {
         struct epoll_event epoll_events[EPOLL_SINGLE_EVENT];

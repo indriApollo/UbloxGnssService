@@ -26,6 +26,9 @@
 #define EXT_VERSION_OFFSET (SW_VERSION_STR_LEN + HW_VERSION_STR_LEN)
 #define EXT_VERSION_STR_LEN 30
 
+#define CFG_NAVSPG_FIXMODE_2DONLY   1
+#define CFG_NAVSPG_DYNMODEL_AUTOMOT 4
+
 uint8_t input_buffer[256];
 
 enum read_progress {
@@ -67,12 +70,29 @@ void close_ublox_port(const int fd) {
     close(fd);
 }
 
-int disable_i2c(uint8_t *buf) {
-    const uint32_t cfg_key = CFG_I2C_ENABLED;
+int reconnect_ublox_port(const int old_fd, const char *port_name, const speed_t baud_rate, const int delay) {
+    close(old_fd);
+    sleep(delay);
+    return setup_ublox_port(port_name, baud_rate);
+}
+
+int set_uint8_cfg(uint8_t *buf, const uint32_t cfg_key, const bool status) {
     memcpy(buf, &cfg_key, CFG_KEY_SIZE);
-    buf[CFG_KEY_SIZE] = false;
+    buf[CFG_KEY_SIZE] = status;
 
     return CFG_KEY_SIZE + 1;
+}
+
+int set_bool_cfg(uint8_t *buf, const uint32_t cfg_key, const bool status) {
+    return set_uint8_cfg(buf, cfg_key, status);
+}
+
+int set_uint16_cfg(uint8_t *buf, const uint32_t cfg_key, const uint16_t val) {
+    const int val_size = sizeof(uint16_t);
+    memcpy(buf, &cfg_key, CFG_KEY_SIZE);
+    memcpy(buf + CFG_KEY_SIZE, &val, val_size);
+
+    return CFG_KEY_SIZE + val_size;
 }
 
 int send_cmd(const int fd, const uint8_t *cmd, const int n) {
@@ -87,7 +107,7 @@ int send_cmd(const int fd, const uint8_t *cmd, const int n) {
         return -1;
     }
 
-    printf_buffer(cmd, c);
+    //printf_buffer(cmd, c);
 
     return 0;
 }
@@ -108,7 +128,26 @@ int configure_ublox(const int fd) {
     ubx_msg[i++] = CFG_LAYER_RAM;
     ubx_msg[i++] = 0; // reserved
     ubx_msg[i++] = 0; // reserved
-    i += disable_i2c(ubx_msg + i);
+
+    // Disable all interfaces other than usb
+    i += set_bool_cfg(ubx_msg + i, CFG_I2C_ENABLED, false);
+    i += set_bool_cfg(ubx_msg + i, CFG_UART1_ENABLED, false);
+    i += set_bool_cfg(ubx_msg + i, CFG_UART2_ENABLED, false);
+    i += set_bool_cfg(ubx_msg + i, CFG_SPI_ENABLED, false);
+
+    // Enable UBX, disable NMEA over usb
+    i += set_bool_cfg(ubx_msg + i, CFG_USBOUTPROT_UBX, true);
+    i += set_bool_cfg(ubx_msg + i, CFG_USBOUTPROT_NMEA, false);
+
+    // Set fix mode to 2d, automotive dynamic profile
+    i += set_uint8_cfg(ubx_msg + i, CFG_NAVSPG_FIXMODE, CFG_NAVSPG_FIXMODE_2DONLY);
+    i += set_uint8_cfg(ubx_msg + i, CFG_NAVSPG_DYNMODEL, CFG_NAVSPG_DYNMODEL_AUTOMOT);
+
+    // Set gnss measurements to 25hz
+    i += set_uint8_cfg(ubx_msg + i, CFG_MSGOUT_UBX_NAV_POSLLH_USB, 1);
+    i += set_uint8_cfg(ubx_msg + i, CFG_MSGOUT_UBX_NAV_STATUS_USB, 10);
+    i += set_uint16_cfg(ubx_msg + i, CFG_RATE_MEAS, 25);
+    i += set_uint16_cfg(ubx_msg + i, CFG_RATE_NAV, 1);
 
     // set len
     const uint16_t payload_len = i - UBX_PAYLOAD_OFFSET;
@@ -131,6 +170,45 @@ int request_ublox_version(const int fd) {
     return send_cmd(fd, ubx_msg, sizeof(ubx_msg));
 }
 
+void handle_ubx_nav_posllh(const uint8_t *msg) {
+    assert(as_uint16(msg + UBX_LEN_OFFSET) == 28);
+
+    const int32_t lon = as_int32(msg + UBX_PAYLOAD_OFFSET + 4);
+    const int32_t lat = as_int32(msg + + UBX_PAYLOAD_OFFSET + 8);
+    const uint32_t h_acc = as_uint32(msg + UBX_PAYLOAD_OFFSET + 20);
+
+    printf("lon %d, lat %d, acc %d\n", lon, lat, h_acc);
+}
+
+void handle_ubx_nav_status(const uint8_t *msg) {
+    assert(as_uint16(msg + UBX_LEN_OFFSET) == 16);
+
+    const uint8_t gps_fix = msg[UBX_PAYLOAD_OFFSET + 4];
+    const uint8_t flags = msg[UBX_PAYLOAD_OFFSET + 5];
+    const uint8_t status = msg[UBX_PAYLOAD_OFFSET + 6];
+    const uint32_t ttff = as_uint32(msg + UBX_PAYLOAD_OFFSET + 8);
+    const uint32_t msss = as_uint32(msg + UBX_PAYLOAD_OFFSET + 12);
+
+    printf("gps fix %d, flags %d, status %d, ttff %d, msss %d\n", gps_fix, flags, status, ttff, msss);
+}
+
+int handle_ubx_nav(const uint8_t *msg) {
+    const uint8_t msg_id = msg[UBX_ID_OFFSET];
+
+    switch (msg_id) {
+        case UBX_NAV_POSLLH:
+            handle_ubx_nav_posllh(msg);
+            break;
+        case UBX_NAV_STATUS:
+            handle_ubx_nav_status(msg);
+            break;
+        default:
+            return UNHANDLED_MSG;
+    }
+
+    return 0;
+}
+
 int handle_ubx_mon(const uint8_t *msg) {
     const uint8_t msg_id = msg[UBX_ID_OFFSET];
 
@@ -139,7 +217,7 @@ int handle_ubx_mon(const uint8_t *msg) {
     char *sw_version = (char*)msg + UBX_PAYLOAD_OFFSET;
     char *hw_version = (char*)msg + UBX_PAYLOAD_OFFSET + SW_VERSION_STR_LEN;
 
-    printf("versions:\n  sw: %s\n  hw: %s\n  xt: ", sw_version, hw_version);
+    printf("ubx versions:\n  sw: %s\n  hw: %s\n  xt: ", sw_version, hw_version);
 
     const int ext_len = as_uint16(msg + UBX_LEN_OFFSET) - SW_VERSION_STR_LEN - HW_VERSION_STR_LEN;
     for (int i = 0; i < ext_len / EXT_VERSION_STR_LEN; i++) {
@@ -158,7 +236,7 @@ int handle_ubx_ack(const uint8_t* msg) {
     const uint8_t acked_msg_id = msg[UBX_PAYLOAD_OFFSET + 1];
 
     if (!is_ack) {
-        printf("UBX-ACK-NAK class %d id %d\n", acked_msg_class, acked_msg_id);
+        fprintf(stderr, "UBX-ACK-NAK class %d id %d\n", acked_msg_class, acked_msg_id);
         return -1;
     }
 
@@ -170,6 +248,8 @@ int handle_ublox_msg(const uint8_t* msg) {
     const uint8_t msg_class = msg[UBX_CLASS_OFFSET];
 
     switch (msg_class) {
+        case UBX_NAV:
+            return handle_ubx_nav(msg);
         case UBX_MON:
             return handle_ubx_mon(msg);
         case UBX_ACK:
