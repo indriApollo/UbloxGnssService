@@ -18,8 +18,8 @@
 #define INTER_BYTE_TIMEOUT  1
 
 #define CFG_KEY_SIZE sizeof(uint32_t)
-#define CFG_VERSION  0
-#define CFG_LAYER_RAM      1
+#define CFG_VERSION   0
+#define CFG_LAYER_RAM 1
 
 #define SW_VERSION_STR_LEN  30
 #define HW_VERSION_STR_LEN  10
@@ -334,10 +334,11 @@ int configure_ublox(const int fd) {
     i += set_uint16_cfg(ubx_msg + i, CFG_RATE_MEAS, 25);
     i += set_uint16_cfg(ubx_msg + i, CFG_RATE_NAV, 1);
 
-    // set len
+    // Set payload len
     const uint16_t payload_len = i - UBX_PAYLOAD_OFFSET;
     memcpy(ubx_msg + UBX_LEN_OFFSET, &payload_len, sizeof(uint16_t));
 
+    // Compute checksum
     const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, UBX_HEADER_LEN + payload_len);
     memcpy(ubx_msg + i, &ck, sizeof(uint16_t));
 
