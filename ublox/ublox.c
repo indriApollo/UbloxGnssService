@@ -51,31 +51,6 @@ void reset_read(const int nbytes_to_keep) {
     buffer_read.progress = SEARCH_FOR_SYNC;
 }
 
-int setup_ublox_port(const char *port_name, const speed_t baud_rate) {
-    const int fd = open_serial_port_blocking_io(port_name);
-    if (fd < 0) return -1;
-
-    if (set_serial_port_access_exclusive(fd) < 0) return -1;
-
-    if (configure_serial_port(fd, WAIT_FOR_FIRST_BYTE, INTER_BYTE_TIMEOUT, baud_rate) < 0) {
-        set_serial_port_access_nonexclusive(fd);
-        return -1;
-    }
-
-    return fd;
-}
-
-void close_ublox_port(const int fd) {
-    set_serial_port_access_nonexclusive(fd);
-    close(fd);
-}
-
-int reconnect_ublox_port(const int old_fd, const char *port_name, const speed_t baud_rate, const int delay) {
-    close(old_fd);
-    sleep(delay);
-    return setup_ublox_port(port_name, baud_rate);
-}
-
 int set_uint8_cfg(uint8_t *buf, const uint32_t cfg_key, const bool status) {
     memcpy(buf, &cfg_key, CFG_KEY_SIZE);
     buf[CFG_KEY_SIZE] = status;
@@ -110,64 +85,6 @@ int send_cmd(const int fd, const uint8_t *cmd, const int n) {
     //printf_buffer(cmd, c);
 
     return 0;
-}
-
-int configure_ublox(const int fd) {
-    int i = 0;
-    uint8_t ubx_msg[128];
-
-    // Set header
-    ubx_msg[i++] = UBX_SYNC_CHAR_1;
-    ubx_msg[i++] = UBX_SYNC_CHAR_2;
-    ubx_msg[i++] = UBX_CFG;
-    ubx_msg[i] = UBX_CFG_VALSET;
-
-    // Set payload
-    i = UBX_PAYLOAD_OFFSET;
-    ubx_msg[i++] = CFG_VERSION;
-    ubx_msg[i++] = CFG_LAYER_RAM;
-    ubx_msg[i++] = 0; // reserved
-    ubx_msg[i++] = 0; // reserved
-
-    // Disable all interfaces other than usb
-    i += set_bool_cfg(ubx_msg + i, CFG_I2C_ENABLED, false);
-    i += set_bool_cfg(ubx_msg + i, CFG_UART1_ENABLED, false);
-    i += set_bool_cfg(ubx_msg + i, CFG_UART2_ENABLED, false);
-    i += set_bool_cfg(ubx_msg + i, CFG_SPI_ENABLED, false);
-
-    // Enable UBX, disable NMEA over usb
-    i += set_bool_cfg(ubx_msg + i, CFG_USBOUTPROT_UBX, true);
-    i += set_bool_cfg(ubx_msg + i, CFG_USBOUTPROT_NMEA, false);
-
-    // Set fix mode to 2d, automotive dynamic profile
-    i += set_uint8_cfg(ubx_msg + i, CFG_NAVSPG_FIXMODE, CFG_NAVSPG_FIXMODE_2DONLY);
-    i += set_uint8_cfg(ubx_msg + i, CFG_NAVSPG_DYNMODEL, CFG_NAVSPG_DYNMODEL_AUTOMOT);
-
-    // Set gnss measurements to 25hz
-    i += set_uint8_cfg(ubx_msg + i, CFG_MSGOUT_UBX_NAV_POSLLH_USB, 1);
-    i += set_uint8_cfg(ubx_msg + i, CFG_MSGOUT_UBX_NAV_STATUS_USB, 10);
-    i += set_uint16_cfg(ubx_msg + i, CFG_RATE_MEAS, 25);
-    i += set_uint16_cfg(ubx_msg + i, CFG_RATE_NAV, 1);
-
-    // set len
-    const uint16_t payload_len = i - UBX_PAYLOAD_OFFSET;
-    memcpy(ubx_msg + UBX_LEN_OFFSET, &payload_len, sizeof(uint16_t));
-
-    const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, UBX_HEADER_LEN + payload_len);
-    memcpy(ubx_msg + i, &ck, sizeof(uint16_t));
-
-    i += UBX_CK_LEN;
-
-    assert(i < sizeof(ubx_msg));
-    return send_cmd(fd, ubx_msg, i);
-}
-
-int request_ublox_version(const int fd) {
-    const uint8_t ubx_msg[] = {
-        UBX_SYNC_CHAR_1, UBX_SYNC_CHAR_2, UBX_MON, UBX_MON_VER, 0, 0, 0x0e, 0x34
-    };
-
-    return send_cmd(fd, ubx_msg, sizeof(ubx_msg));
 }
 
 void handle_ubx_nav_posllh(const uint8_t *msg) {
@@ -257,6 +174,25 @@ int handle_ublox_msg(const uint8_t* msg) {
         default:
             return UNHANDLED_MSG;
     }
+}
+
+int setup_ublox_port(const char *port_name, const speed_t baud_rate) {
+    const int fd = open_serial_port_blocking_io(port_name);
+    if (fd < 0) return -1;
+
+    if (set_serial_port_access_exclusive(fd) < 0) return -1;
+
+    if (configure_serial_port(fd, WAIT_FOR_FIRST_BYTE, INTER_BYTE_TIMEOUT, baud_rate) < 0) {
+        set_serial_port_access_nonexclusive(fd);
+        return -1;
+    }
+
+    return fd;
+}
+
+void close_ublox_port(const int fd) {
+    set_serial_port_access_nonexclusive(fd);
+    close(fd);
 }
 
 int parse_ublox_msg(const int fd, uint8_t **msg) {
@@ -358,4 +294,55 @@ int handle_incoming_ublox_msg(const int fd) {
         return r;
 
     return handle_ublox_msg(msg);
+}
+
+int request_ublox_version(const int fd) {
+    const uint8_t ubx_msg[] = {
+        UBX_SYNC_CHAR_1, UBX_SYNC_CHAR_2, UBX_MON, UBX_MON_VER, 0, 0, 0x0e, 0x34
+    };
+
+    return send_cmd(fd, ubx_msg, sizeof(ubx_msg));
+}
+
+int configure_ublox(const int fd) {
+    int i = 0;
+    uint8_t ubx_msg[128];
+
+    // Set header
+    ubx_msg[i++] = UBX_SYNC_CHAR_1;
+    ubx_msg[i++] = UBX_SYNC_CHAR_2;
+    ubx_msg[i++] = UBX_CFG;
+    ubx_msg[i] = UBX_CFG_VALSET;
+
+    // Set payload
+    i = UBX_PAYLOAD_OFFSET;
+    ubx_msg[i++] = CFG_VERSION;
+    ubx_msg[i++] = CFG_LAYER_RAM;
+    ubx_msg[i++] = 0; // reserved
+    ubx_msg[i++] = 0; // reserved
+
+    // Enable UBX, disable NMEA over usb
+    i += set_bool_cfg(ubx_msg + i, CFG_USBOUTPROT_UBX, true);
+    i += set_bool_cfg(ubx_msg + i, CFG_USBOUTPROT_NMEA, false);
+
+    // Set fix mode to 2d, automotive dynamic profile
+    i += set_uint8_cfg(ubx_msg + i, CFG_NAVSPG_FIXMODE, CFG_NAVSPG_FIXMODE_2DONLY);
+    i += set_uint8_cfg(ubx_msg + i, CFG_NAVSPG_DYNMODEL, CFG_NAVSPG_DYNMODEL_AUTOMOT);
+
+    // Set gnss measurements to 25hz
+    i += set_uint8_cfg(ubx_msg + i, CFG_MSGOUT_UBX_NAV_POSLLH_USB, 1);
+    i += set_uint16_cfg(ubx_msg + i, CFG_RATE_MEAS, 25);
+    i += set_uint16_cfg(ubx_msg + i, CFG_RATE_NAV, 1);
+
+    // set len
+    const uint16_t payload_len = i - UBX_PAYLOAD_OFFSET;
+    memcpy(ubx_msg + UBX_LEN_OFFSET, &payload_len, sizeof(uint16_t));
+
+    const uint16_t ck = fletcher8(ubx_msg + UBX_CLASS_OFFSET, UBX_HEADER_LEN + payload_len);
+    memcpy(ubx_msg + i, &ck, sizeof(uint16_t));
+
+    i += UBX_CK_LEN;
+
+    assert(i < sizeof(ubx_msg));
+    return send_cmd(fd, ubx_msg, i);
 }

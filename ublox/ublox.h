@@ -45,10 +45,6 @@ enum ubx_id {
 };
 
 enum ubx_cfg_key_id {
-    CFG_I2C_ENABLED = 0x10510003,
-    CFG_UART1_ENABLED = 0x10520005,
-    CFG_UART2_ENABLED = 0x10530005,
-    CFG_SPI_ENABLED = 0x10640006,
     CFG_USBOUTPROT_UBX = 0x10780001,
     CFG_USBOUTPROT_NMEA = 0x10780002,
     CFG_NAVSPG_FIXMODE = 0x20110011,
@@ -62,8 +58,6 @@ enum ubx_cfg_key_id {
 int setup_ublox_port(const char *port_name, speed_t baud_rate);
 
 void close_ublox_port(int fd);
-
-int reconnect_ublox_port(int old_fd, const char *port_name, speed_t baud_rate, int delay);
 
 int parse_ublox_msg(int fd, uint8_t **msg);
 

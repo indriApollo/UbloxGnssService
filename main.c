@@ -92,15 +92,12 @@ int main(void)
     const int signalfd_fd = setup_signal_handler();
 
     printf("Setting up serial port %s@%d\n", SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
-    int ublox_fd = setup_ublox_port(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
+    const int ublox_fd = setup_ublox_port(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
     if (ublox_fd < 0) exit(EXIT_FAILURE);
 
     // Sending configurations will reset the ublox usb interface
     printf("Configuring ublox ...\n");
     configure_ublox(ublox_fd);
-    printf("Reconnecting serial port...\n");
-    ublox_fd = reconnect_ublox_port(ublox_fd, SERIAL_PORT_NAME, SERIAL_BAUD_RATE, 3);
-    if (ublox_fd < 0) exit(EXIT_FAILURE);
 
     request_ublox_version(ublox_fd);
 
