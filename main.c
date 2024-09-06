@@ -82,6 +82,10 @@ static int setup_epoll(const int signalfd_fd, const int ublox_fd) {
     return fd;
 }
 
+void handle_position(const coord pos) {
+    printf("gps pos %d %d\n", pos.lon, pos.lat);
+}
+
 int main(void)
 {
     #ifdef RUN_TESTS
@@ -91,11 +95,12 @@ int main(void)
 
     const int signalfd_fd = setup_signal_handler();
 
+    set_ublox_position_callback(&handle_position, 3000);
+
     printf("Setting up serial port %s@%d\n", SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
     const int ublox_fd = setup_ublox_port(SERIAL_PORT_NAME, SERIAL_BAUD_RATE);
     if (ublox_fd < 0) exit(EXIT_FAILURE);
 
-    // Sending configurations will reset the ublox usb interface
     printf("Configuring ublox ...\n");
     configure_ublox(ublox_fd);
 

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <termios.h>
+#include "../utils/coord.h"
 
 #define UBX_SYNC_CHAR_1 0xb5
 #define UBX_SYNC_CHAR_2 0x62
@@ -66,5 +67,7 @@ int handle_incoming_ublox_msg(int fd);
 int configure_ublox(int fd);
 
 int request_ublox_version(int fd);
+
+void set_ublox_position_callback(void (*callback)(coord pos), uint32_t max_acc);
 
 #endif //UBLOX_H

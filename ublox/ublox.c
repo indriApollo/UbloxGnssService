@@ -29,6 +29,9 @@
 #define CFG_NAVSPG_FIXMODE_2DONLY   1
 #define CFG_NAVSPG_DYNMODEL_AUTOMOT 4
 
+void (*position_callback)(coord pos) = NULL;
+uint32_t position_callback_max_acc = 0;
+
 uint8_t input_buffer[256];
 
 enum read_progress {
@@ -58,6 +61,7 @@ int set_uint8_cfg(uint8_t *buf, const uint32_t cfg_key, const bool status) {
     return CFG_KEY_SIZE + 1;
 }
 
+// ReSharper disable once CppDFAConstantFunctionResult
 int set_bool_cfg(uint8_t *buf, const uint32_t cfg_key, const bool status) {
     return set_uint8_cfg(buf, cfg_key, status);
 }
@@ -95,6 +99,11 @@ void handle_ubx_nav_posllh(const uint8_t *msg) {
     const uint32_t h_acc = as_uint32(msg + UBX_PAYLOAD_OFFSET + 20);
 
     printf("lon %d, lat %d, acc %d\n", lon, lat, h_acc);
+
+    if (h_acc <= position_callback_max_acc) {
+        const coord pos = { .lon = lon, .lat = lat };
+        (*position_callback)(pos);
+    }
 }
 
 void handle_ubx_nav_status(const uint8_t *msg) {
@@ -296,14 +305,6 @@ int handle_incoming_ublox_msg(const int fd) {
     return handle_ublox_msg(msg);
 }
 
-int request_ublox_version(const int fd) {
-    const uint8_t ubx_msg[] = {
-        UBX_SYNC_CHAR_1, UBX_SYNC_CHAR_2, UBX_MON, UBX_MON_VER, 0, 0, 0x0e, 0x34
-    };
-
-    return send_cmd(fd, ubx_msg, sizeof(ubx_msg));
-}
-
 int configure_ublox(const int fd) {
     int i = 0;
     uint8_t ubx_msg[128];
@@ -346,4 +347,17 @@ int configure_ublox(const int fd) {
 
     assert(i < sizeof(ubx_msg));
     return send_cmd(fd, ubx_msg, i);
+}
+
+int request_ublox_version(const int fd) {
+    const uint8_t ubx_msg[] = {
+        UBX_SYNC_CHAR_1, UBX_SYNC_CHAR_2, UBX_MON, UBX_MON_VER, 0, 0, 0x0e, 0x34
+    };
+
+    return send_cmd(fd, ubx_msg, sizeof(ubx_msg));
+}
+
+void set_ublox_position_callback(void (*callback)(coord pos), const uint32_t max_acc) {
+    position_callback = callback;
+    position_callback_max_acc = max_acc;
 }
