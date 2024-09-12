@@ -100,7 +100,7 @@ void handle_ubx_nav_posllh(const uint8_t *msg) {
 
     printf("lon %d, lat %d, acc %d\n", lon, lat, h_acc);
 
-    if (h_acc <= position_callback_max_acc) {
+    if (position_callback != NULL && h_acc <= position_callback_max_acc) {
         const coord pos = { .lon = lon, .lat = lat };
         (*position_callback)(pos);
     }

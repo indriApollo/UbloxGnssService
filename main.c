@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/signalfd.h>
+
+#include "chrono/chrono.h"
 #include "ublox/ublox.h"
 
 #define _RUN_TESTS
@@ -80,10 +82,6 @@ static int setup_epoll(const int signalfd_fd, const int ublox_fd) {
     epoll_add_fd(fd, ublox_fd);
 
     return fd;
-}
-
-void handle_position(const coord pos) {
-    printf("gps pos %d %d\n", pos.lon, pos.lat);
 }
 
 int main(void)

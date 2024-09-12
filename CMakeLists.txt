@@ -18,4 +18,6 @@ add_executable(UbloxGnssService main.c
         utils/intersect.h
         utils/coord.h
         utils/buffer.c
-        utils/buffer.h)
+        utils/buffer.h
+        chrono/chrono.c
+        chrono/chrono.h)

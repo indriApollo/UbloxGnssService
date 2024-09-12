@@ -5,6 +5,7 @@
 #ifndef UBLOXGNSSSERVICE_INTERSECT_H
 #define UBLOXGNSSSERVICE_INTERSECT_H
 
+#include <stdbool.h>
 #include "coord.h"
 
 bool do_intersect(coord p1, coord q1, coord p2, coord q2);
